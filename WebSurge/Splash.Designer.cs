@@ -44,7 +44,6 @@
             // 
             // StartupTimer
             // 
-            this.StartupTimer.Interval = 3000;
             this.StartupTimer.Tick += new System.EventHandler(this.StartupTimer_Tick);
             // 
             // lblRegisterType

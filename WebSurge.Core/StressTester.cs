@@ -433,12 +433,11 @@ namespace WebSurge
                     // using West Wind HttpClient
                     string httpOutput = client.DownloadString(result.Url);
 
-                    
                     if (CancelThreads)
                         return null;
 
                     sw.Stop();
-                    result.TimeTakenMs = (int)sw.ElapsedMilliseconds;  //(int)DateTime.UtcNow.Subtract(dt).TotalMilliseconds;
+                    result.TimeTakenMs = (int)sw.Elapsed.TotalMilliseconds;  //(int)DateTime.UtcNow.Subtract(dt).TotalMilliseconds;
                     
                     if (client.Error || client.WebResponse == null)
                     {
@@ -768,10 +767,11 @@ namespace WebSurge
         /// <param name="requests">HttpRequests to run</param>
         /// <param name="runOnce">When set only fires once</param>
         /// <param name="threadNumber">Thread number that identifies this thread. Id is used to map users to threads.</param>
-        public void RunSessions(List<HttpRequestData> requests, bool runOnce, int threadNumber = 0)
+        public List<HttpRequestData> RunSessions(List<HttpRequestData> requests, bool runOnce, int threadNumber = 0)
         {
             List<HttpRequestData> reqs = null;
-            
+            List<HttpRequestData> rslt = new List<HttpRequestData>();
+
             if (Options.RandomizeRequests)
             {
                 var rqs = requests;
@@ -807,6 +807,8 @@ namespace WebSurge
                                             
                     var result = CheckSite(req, cookieContainer, threadNumber);
                     
+                    rslt.Add(result);
+                    
                     if (result != null)
                         RequestWriter.Write(result);
 
@@ -823,6 +825,67 @@ namespace WebSurge
                 }
 
                 if (runOnce)
+                    break;
+            }
+
+            return rslt;
+        }
+        public void RunSessions(List<HttpRequestData> requests, int attempts, int threadNumber = 0)
+        {
+            List<HttpRequestData> reqs = null;
+
+            if (Options.RandomizeRequests)
+            {
+                var rqs = requests;
+                reqs = new List<HttpRequestData>();
+                reqs.AddRange(rqs.Where(r2 => r2.SortNoRandmomize).OrderBy(r2 => r2.SortOrder));
+
+                var r = new Random();
+                foreach (var req in rqs.Where(r2 => !r2.SortNoRandmomize)
+                    .OrderBy(rq => r.NextDouble())
+                    .ToList())
+                {
+                    reqs.Add(req);
+                }
+
+                rqs = null;
+            }
+            else
+                reqs = requests as List<HttpRequestData>;
+
+            var tries = 0;
+            while (!CancelThreads)
+            {
+                tries++;
+                CookieContainer cookieContainer = App.Configuration.StressTester.TrackPerSessionCookies
+                    ? cookieContainer = new CookieContainer()
+                    : null;
+
+                foreach (var req in reqs)
+                {
+                    if (CancelThreads)
+                        break;
+
+                    //Debug.WriteLine("Thread: " + Thread.CurrentThread.ManagedThreadId + " - " + req.Url + " Cookies: " + (cookieContainer?.Count ?? -1) );
+
+                    var result = CheckSite(req, cookieContainer, threadNumber);
+
+                    if (result != null)
+                        RequestWriter.Write(result);
+
+                    if (Options.DelayTimeMs == 0)
+                    {
+                        Thread.Yield();
+                    }
+                    else if (Options.DelayTimeMs < 0)
+                    {
+                        // no yielding - can generate more requests but much more cpu usage
+                    }
+                    else
+                        Thread.Sleep(Options.DelayTimeMs);
+                }
+
+                if (tries >=attempts)
                     break;
             }
         }

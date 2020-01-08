@@ -245,62 +245,64 @@ namespace WebSurge
             Hide();
             Application.DoEvents();
 
-            App.Configuration.WindowSettings.Accesses++;
-            if (!UnlockKey.Unlocked)
-            {
-                var displayCount = 5;
-                if (App.Configuration.WindowSettings.Accesses > 250)
-                    displayCount = 1;
-                else if (App.Configuration.WindowSettings.Accesses > 100)
-                    displayCount = 2;
-                else if (App.Configuration.WindowSettings.Accesses > 50)
-                    displayCount = 3;
+            //App.Configuration.WindowSettings.Accesses++;
+            //if (!UnlockKey.Unlocked)
+            //{
+            //    var displayCount = 5;
+            //    if (App.Configuration.WindowSettings.Accesses > 250)
+            //        displayCount = 1;
+            //    else if (App.Configuration.WindowSettings.Accesses > 100)
+            //        displayCount = 2;
+            //    else if (App.Configuration.WindowSettings.Accesses > 50)
+            //        displayCount = 3;
 
-                if (App.Configuration.WindowSettings.Accesses % displayCount == 0)
-                {
-                    var form = new RegisterDialog();
-                    form.ShowDialog();
-                }
-            }
+            //    if (App.Configuration.WindowSettings.Accesses % displayCount == 0)
+            //    {
+            //        var form = new RegisterDialog();
+            //        form.ShowDialog();
+            //    }
+            //}
             
             if (StressTester != null)
                 StressTester.CancelThreads = true;
             
             SaveOptions();
+
+            Application.Exit();
         }
 
 
         private void StressTestForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            CheckForNewVersion(false);
+            //CheckForNewVersion(false);
 
-            if (!UnlockKey.IsRegistered())
-            {
-                var accessed = App.Configuration.WindowSettings.Accesses;
-                var displayCount = 10;
+            //if (!UnlockKey.IsRegistered())
+            //{
+            //    var accessed = App.Configuration.WindowSettings.Accesses;
+            //    var displayCount = 10;
 
-                if (accessed > 150)
-                    displayCount = 1;
-                else if (accessed > 100)
-                    displayCount = 2;
-                else if (accessed > 70)
-                    displayCount = 4;
-                else if (accessed > 30)
-                    displayCount = 7;
+            //    if (accessed > 150)
+            //        displayCount = 1;
+            //    else if (accessed > 100)
+            //        displayCount = 2;
+            //    else if (accessed > 70)
+            //        displayCount = 4;
+            //    else if (accessed > 30)
+            //        displayCount = 7;
 
-                if (accessed % displayCount == 0)
-                {
-                    regForm = new RegisterDialog();
-                    regForm.StartPosition = FormStartPosition.Manual;
-                    regForm.Left = Left + Width / 2 - regForm.Width / 2;
-                    regForm.Top = Top + Height / 2 - regForm.Height / 2 + 40;
-                    regForm.TopMost = true;
+            //    if (accessed % displayCount == 0)
+            //    {
+            //        regForm = new RegisterDialog();
+            //        regForm.StartPosition = FormStartPosition.Manual;
+            //        regForm.Left = Left + Width / 2 - regForm.Width / 2;
+            //        regForm.Top = Top + Height / 2 - regForm.Height / 2 + 40;
+            //        regForm.TopMost = true;
 
-                    Hide();
+            //        Hide();
 
-                    regForm.ShowDialog();
-                }
-            }
+            //        regForm.ShowDialog();
+            //    }
+            //}
         }
 
         void Export(string mode)
@@ -733,8 +735,53 @@ namespace WebSurge
                 BeginInvoke(new Action<List<HttpRequestData>>(ParseResults), StressTester.RequestWriter.GetResults());
             });
             t.Start();
+        }
 
+        private List<HttpRequestData> MultipleRun()
+        {
+            ShowStatus("Running all requests...");
+            ListResults.BeginUpdate();
+            ListResults.Items.Clear();
+            ListResults.EndUpdate();
 
+            TestResultBrowser.Visible = false;
+            txtConsole.Visible = true;
+            txtConsole.Text = "Processing " + Requests.Count + " requests...\r\n";
+
+            TabsResult.SelectedTab = tabOutput;
+            Application.DoEvents();
+            StressTester.RequestWriter.Clear();
+
+            StressTester.CancelThreads = false;
+
+            List<HttpRequestData> results = null;
+
+            var task = Task.Run(() => {
+                try
+                {
+                    statusOutputBufferDelay = 1;
+                    results = StressTester.RunSessions(Requests.Where(req => req.IsActive).ToList(), true);
+                    statusOutputBufferDelay = 250;
+
+                    Application.DoEvents();
+
+                    ShowStatus("Running all requests completed.", 5);
+                    Application.DoEvents();
+
+                    BeginInvoke(new Action<List<HttpRequestData>>(ParseResults), StressTester.RequestWriter.GetResults());
+                }
+                catch (Exception ex)
+                {
+                    Trace.WriteLine("MultipleRun Exception: " + ex.Message);
+                }
+            });
+
+            while (task.Status != TaskStatus.RanToCompletion && task.Status != TaskStatus.Canceled && task.Status != TaskStatus.Faulted) {
+                Application.DoEvents();
+                Thread.Sleep(TimeSpan.FromSeconds(.5));
+            }
+
+            return results;
         }
 
 
@@ -812,20 +859,30 @@ namespace WebSurge
 
         private void ParseResults(List<HttpRequestData> results)
         {
+            ParseResults(results, true);
+        }
+
+        private string resultsHTML = $"html\\_results{Guid.NewGuid().ToString().Replace("-", "")}.html";
+        private void ParseResults(List<HttpRequestData> results, bool withEvents)
+        {
             TabSessions.SelectedTab = tabResults;
 
             var html = StressTester.ResultsParser.GetResultReportHtml(StressTester.RequestWriter,
-                StressTester.TimeTakenForLastRunMs,StressTester.ThreadsUsed);
+                StressTester.TimeTakenForLastRunMs, StressTester.ThreadsUsed);
 
-            HtmlPreview(html, false,"html\\_results.html");
+            HtmlPreview(html, false, resultsHTML);
 
-            Application.DoEvents();
+            if (withEvents)
+                Application.DoEvents();
 
-            RenderResultList(results);
+            RenderResultList(results, withEvents);
         }
 
-
         void RenderResultList(List<HttpRequestData> results)
+        {
+            RenderResultList(results, true);
+        }
+        void RenderResultList(List<HttpRequestData> results, bool withEvents)
         {
             ListResults.BeginUpdate();
             ListResults.Items.Clear();
@@ -834,7 +891,8 @@ namespace WebSurge
             // clear out progress status
             ShowStatus(null, 3);
 
-            Application.DoEvents();
+            if (withEvents)
+                Application.DoEvents();
 
             IEnumerable<HttpRequestData> filtered = null;
             
@@ -949,7 +1007,7 @@ namespace WebSurge
             if (!showInBrowser)
             {
                 // _results.html is rendered into the output tab
-                if (fileName == "html\\_results.html")
+                if (fileName == resultsHTML)
                 {                    
                     TestResultBrowser.Url = new Uri(file);
                     TestResultBrowser.Visible = true;                    
@@ -974,7 +1032,7 @@ namespace WebSurge
                         Splash.Close();                        
                     }
                 })),
-                null, 1000, 
+                null, 10, 
                 Timeout.Infinite);                
             }
             Application.DoEvents();
@@ -1389,7 +1447,13 @@ namespace WebSurge
             {
                 TestAllSiteUrls();
             }
+            if (sender == tbMulti)
+            {
+                var req = txtRequestUrl.Tag as HttpRequestData;
+                req = SaveRequest(req);
 
+                MultiRun(req);
+            }
 
             if (sender == btnOpenInDefaultBrowser)
             {
@@ -1749,6 +1813,125 @@ any reported issues.";
 
             txtRequestHeaders.WordWrap = checkBox.Checked;
             App.Configuration.WrapHeaderText = true;
+        }
+
+        private void mulStop_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                multiStop = true;
+                StressTester.CancelThreads = true;
+            }
+            catch(Exception ex)
+            {
+                Trace.WriteLine("mulGo_Click Exception: " + ex.Message);
+            }
+        }
+        bool multiStop = false;
+        private void MultiRun(HttpRequestData req)
+        {
+            try
+            {
+                multiStop = false;
+
+                var totalSeconds = 0;
+
+                if (!int.TryParse(mulTime.Text, out totalSeconds))
+                    totalSeconds = 60;
+
+                var sw = new Stopwatch();
+                sw.Reset();
+                sw.Start();
+
+                ShowStatus("Running all requests...");
+
+                while (sw.Elapsed.TotalSeconds <= totalSeconds)
+                {
+                    if (multiStop)
+                        return;
+
+                    Application.DoEvents();
+                    TestSiteUrl(req);
+                    Thread.Sleep(TimeSpan.FromSeconds(1));
+                }
+
+                return;
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("MultiRun Exception: " + ex.Message);
+            }
+        }
+
+        private void mulStart_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                molSuccessFail.Text = "Success/Errors: 0/0";
+                molSuccessFail.Visible = true;                
+
+                multiStop = false;
+
+                var totalSeconds = 0;
+                var restSeconds = 0;
+
+                if (!int.TryParse(mulTime.Text, out totalSeconds))
+                    totalSeconds = 60;
+
+                if (!int.TryParse(mulRest.Text, out restSeconds))
+                    restSeconds = 20;
+
+                totalSeconds = totalSeconds < 1 ? 1 : totalSeconds;
+
+
+                ShowStatus("Running all requests...");
+
+                var sw = new Stopwatch();
+                sw.Reset();
+                sw.Start();
+
+                while (sw.Elapsed.TotalSeconds <= totalSeconds)
+                {
+                    if (multiStop)
+                        return;
+
+                    Application.DoEvents();
+
+                    var results = this.MultipleRun();
+
+                    var errors = 0;
+                    var success = 0;
+
+                    foreach (var result in results)
+                    {
+                        if (result.IsError)
+                            errors++;
+                        else
+                            success++;
+                    }
+
+                    molSuccessFail.Text = $"Success/Errors: {success}/{errors}"; ;
+
+                    //TestAllSiteUrls();
+
+                    if (totalSeconds == 1)
+                        return;
+
+                    for (var i = 0; i < restSeconds; i++)
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(1));
+                        Application.DoEvents();
+                        if (multiStop)
+                            return;
+                    }
+                }
+
+                return;
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("MultiRun Exception: " + ex.Message);
+            }
         }
     }
 
